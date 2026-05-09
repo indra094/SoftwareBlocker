@@ -1,0 +1,49 @@
+{
+  "name": "software-blocker",
+  "version": "1.0.0",
+  "description": "A Windows desktop app that blocks selected software during a daily schedule.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "keywords": [
+    "windows",
+    "blocker",
+    "focus",
+    "productivity",
+    "electron"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^35.2.1",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.indrajeet.softwareblocker",
+    "productName": "Software Blocker",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "styles.css",
+      "README.md"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

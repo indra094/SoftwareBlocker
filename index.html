@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Software Blocker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Windows Daily App Blocking</p>
+          <h1>Software Blocker</h1>
+          <p class="hero-copy">
+            Choose the apps you want to restrict, set one daily blocking window, and keep the
+            blocker running in the tray at startup.
+          </p>
+        </div>
+        <div class="status-card">
+          <p class="status-label">Current Status</p>
+          <h2 id="liveStatus">Loading...</h2>
+          <p id="statusDetail" class="status-detail"></p>
+        </div>
+      </section>
+
+      <section id="setupView" class="panel hidden">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">First Launch</p>
+            <h2>Create Admin PIN</h2>
+          </div>
+        </div>
+        <p class="panel-copy">
+          This PIN is required to change settings, stop the blocker, or quit the app.
+        </p>
+        <div class="grid">
+          <label>
+            <span>New PIN</span>
+            <input id="setupPin" type="password" placeholder="At least 4 characters" />
+          </label>
+          <label>
+            <span>Confirm PIN</span>
+            <input id="setupPinConfirm" type="password" placeholder="Repeat the PIN" />
+          </label>
+        </div>
+        <button id="createPinButton" class="primary">Create PIN and continue</button>
+        <p id="setupMessage" class="message"></p>
+      </section>
+
+      <section id="unlockView" class="panel hidden">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Protected Controls</p>
+            <h2>Unlock Settings</h2>
+          </div>
+        </div>
+        <p class="panel-copy">
+          Enter the admin PIN to adjust the schedule, software list, startup behavior, or quit the
+          blocker.
+        </p>
+        <div class="grid one-column">
+          <label>
+            <span>Admin PIN</span>
+            <input id="unlockPin" type="password" placeholder="Enter PIN" />
+          </label>
+        </div>
+        <button id="unlockButton" class="primary">Unlock dashboard</button>
+        <p id="unlockMessage" class="message"></p>
+      </section>
+
+      <section id="dashboardView" class="hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Blocking Rules</p>
+              <h2>Daily Schedule</h2>
+            </div>
+            <button id="saveButton" class="primary">Save changes</button>
+          </div>
+          <div class="grid">
+            <label>
+              <span>Start Time</span>
+              <input id="startTime" type="time" />
+            </label>
+            <label>
+              <span>End Time</span>
+              <input id="endTime" type="time" />
+            </label>
+          </div>
+          <div class="toggles">
+            <label class="toggle">
+              <input id="armedToggle" type="checkbox" />
+              <span>Blocking is armed</span>
+            </label>
+            <label class="toggle">
+              <input id="startupToggle" type="checkbox" />
+              <span>Launch automatically at Windows sign-in</span>
+            </label>
+          </div>
+          <p class="hint">
+            Overnight windows are supported. Example: 22:00 to 06:00 blocks through the night.
+          </p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Blocked Programs</p>
+              <h2>Selected Software</h2>
+            </div>
+            <div class="button-group">
+              <button id="addRunningAppsButton" class="secondary">Add running apps</button>
+              <button id="addAppsButton" class="secondary">Browse for .exe files</button>
+            </div>
+          </div>
+          <p class="hint">
+            You can save the schedule before choosing apps. If Codex is open, use
+            <strong>Add running apps</strong> and select <strong>Codex.exe</strong>.
+          </p>
+          <div id="appList" class="app-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Protected Actions</p>
+              <h2>Authorization</h2>
+            </div>
+          </div>
+          <div class="grid">
+            <label>
+              <span>Admin PIN for saving or quitting</span>
+              <input id="actionPin" type="password" placeholder="Enter PIN to authorize changes" />
+            </label>
+          </div>
+          <div class="action-row">
+            <button id="changePinButton" class="secondary">Change PIN</button>
+            <button id="quitButton" class="danger">Quit blocker</button>
+          </div>
+          <p id="dashboardMessage" class="message"></p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Recent Activity</p>
+              <h2>Enforcement Log</h2>
+            </div>
+          </div>
+          <div id="activityLog" class="activity-log"></div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="pinDialog" class="dialog">
+      <form method="dialog" class="dialog-form">
+        <h3>Change Admin PIN</h3>
+        <label>
+          <span>Current PIN</span>
+          <input id="currentPinInput" type="password" />
+        </label>
+        <label>
+          <span>New PIN</span>
+          <input id="newPinInput" type="password" />
+        </label>
+        <label>
+          <span>Confirm new PIN</span>
+          <input id="newPinConfirmInput" type="password" />
+        </label>
+        <p id="pinDialogMessage" class="message"></p>
+        <div class="action-row end">
+          <button value="cancel" class="secondary" type="submit">Cancel</button>
+          <button id="confirmPinChangeButton" value="default" class="primary" type="button">
+            Save new PIN
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="runningAppsDialog" class="dialog">
+      <form method="dialog" class="dialog-form dialog-wide">
+        <h3>Add Running Apps</h3>
+        <p class="panel-copy">
+          Select currently running apps to add to the blocked list. This is especially useful for
+          Microsoft Store installs like Codex.
+        </p>
+        <div id="runningAppsList" class="running-apps-list"></div>
+        <p id="runningAppsMessage" class="message"></p>
+        <div class="action-row end">
+          <button value="cancel" class="secondary" type="submit">Cancel</button>
+          <button id="refreshRunningAppsButton" class="secondary" type="button">Refresh list</button>
+          <button id="confirmRunningAppsButton" class="primary" type="button">Add selected apps</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>
