@@ -1,31 +1,29 @@
 # Software Blocker
 
-Software Blocker is a Windows desktop app that lets a user choose a set of apps, define one recurring daily time window, and automatically close those apps whenever they are launched during that window.
+Software Blocker is a Windows desktop app that lets a user create one or more blocking buckets. Each bucket has its own recurring daily time window and its own app list, and the app automatically closes those programs whenever they are launched during an active bucket.
 
-This project is intentionally designed as a **tamper-resistant productivity tool**, not as an anti-removal or anti-admin agent. It requires an admin PIN to change settings or quit from the app UI, but it does **not** attempt to make itself impossible to uninstall. Preventing an administrator from removing software crosses a line this project intentionally avoids.
+This project is intentionally designed as a **tamper-resistant productivity tool**, not as an anti-removal or anti-admin agent. It requires an admin PIN to change settings, but it does **not** attempt to make itself impossible to uninstall. Preventing an administrator from removing software crosses a line this project intentionally avoids.
 
 ## What it does
 
 - Lets the user add apps either by browsing for `.exe` files or by selecting from currently running apps.
-- Enforces one daily blocking window, including overnight windows like `22:00` to `06:00`.
-- Runs in the system tray and can launch automatically at Windows sign-in.
+- Supports multiple blocking buckets, each with its own daily time window, including overnight windows like `22:00` to `06:00`.
+- Runs in the system tray and registers itself to launch at Windows sign-in.
 - Requires an admin PIN to:
   - change the blocked app list
-  - change the schedule
-  - disarm blocking
-  - quit the blocker from the dashboard
+  - change bucket schedules
 - Stores settings in the app's Electron `userData` folder.
 
 ## How blocking works
 
-The app checks running Windows processes every few seconds. During the active schedule, it matches the selected executables against running processes and force-closes matches using `taskkill`.
+The app checks running Windows processes every few seconds. During any active bucket schedule, it matches the selected executables against running processes and force-closes matches using `taskkill`.
 
 This is effective for many personal productivity scenarios, but it has limits:
 
 - A Windows administrator can still kill or uninstall the app.
 - Some elevated or protected processes may resist termination.
 - If the user renames or relocates apps, the blocked list may need to be updated.
-- This project currently supports one shared daily schedule for all selected apps.
+- Overlapping buckets are allowed. If the same app appears in multiple active buckets, it will still be closed once and logged with every matching bucket name.
 
 ## Project structure
 
@@ -56,9 +54,9 @@ npm start
 On first launch:
 
 1. Create the admin PIN.
-2. Set the daily start and end time.
-3. Optionally add one or more apps to block.
-4. Keep `Launch automatically at Windows sign-in` enabled if you want it to re-arm after reboot.
+2. Add one or more buckets.
+3. Set each bucket's start and end time.
+4. Add one or more apps to each bucket.
 5. Click `Save changes`.
 
 ## Finding Codex
@@ -91,7 +89,7 @@ The packaged installer will be written to `dist/`.
 - The app starts minimized to the tray when launched with the `--hidden` flag.
 - The tray icon stays alive even if the window is closed.
 - Closing the window hides it instead of quitting.
-- Quitting through the dashboard requires the admin PIN.
+- The app does not include an in-app pause/disarm or quit button (to reduce easy bypasses).
 
 ## Data storage
 
@@ -109,10 +107,7 @@ config.json
 
 That file includes:
 
-- selected blocked apps
-- daily schedule
-- startup preference
-- whether blocking is armed
+- blocking buckets
 - salted PIN hash
 
 ## Uninstall
@@ -121,10 +116,8 @@ This application is intentionally uninstallable by a Windows administrator.
 
 Typical uninstall flow:
 
-1. Open the app dashboard.
-2. Enter the admin PIN.
-3. Quit the blocker.
-4. Uninstall it from Windows Settings or remove the packaged app normally.
+1. Uninstall it from Windows Settings (or run the uninstaller).
+2. If Windows reports it is still running, end the `Software Blocker` / `Software Blocker.exe` process in Task Manager.
 
 If the app was only run from source and not installed:
 

@@ -8,6 +8,5 @@ contextBridge.exposeInMainWorld("softwareBlocker", {
   verifyPin: (payload) => ipcRenderer.invoke("verify-pin", payload),
   saveSettings: (payload) => ipcRenderer.invoke("save-settings", payload),
   changePin: (payload) => ipcRenderer.invoke("change-pin", payload),
-  requestQuit: (payload) => ipcRenderer.invoke("request-quit", payload),
   onStateUpdated: (callback) => ipcRenderer.on("state-updated", callback)
 });

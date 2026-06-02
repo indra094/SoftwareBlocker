@@ -1,11 +1,16 @@
 const state = {
   config: null,
   runtimeState: null,
-  blockedApps: [],
+  buckets: [],
   runningApps: [],
+  appPickerBucketIndex: null,
   unlocked: false,
-  isEditing: false,
-  formHydrated: false
+  isEditing: false
+};
+
+const DEFAULT_SCHEDULE = {
+  start: "09:00",
+  end: "17:00"
 };
 
 const setupView = document.getElementById("setupView");
@@ -13,7 +18,7 @@ const unlockView = document.getElementById("unlockView");
 const dashboardView = document.getElementById("dashboardView");
 const liveStatus = document.getElementById("liveStatus");
 const statusDetail = document.getElementById("statusDetail");
-const appList = document.getElementById("appList");
+const bucketList = document.getElementById("bucketList");
 const activityLog = document.getElementById("activityLog");
 const setupMessage = document.getElementById("setupMessage");
 const unlockMessage = document.getElementById("unlockMessage");
@@ -46,6 +51,44 @@ function formatTimestamp(value) {
   return new Date(value).toLocaleString();
 }
 
+function createBucketId() {
+  return globalThis.crypto?.randomUUID?.() || `bucket-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createEmptyBucket(index = state.buckets.length) {
+  return {
+    id: createBucketId(),
+    name: `Bucket ${index + 1}`,
+    schedule: { ...DEFAULT_SCHEDULE },
+    blockedApps: []
+  };
+}
+
+function cloneBuckets(buckets) {
+  return (buckets || []).map((bucket, index) => ({
+    id: bucket.id || createBucketId(),
+    name: bucket.name || `Bucket ${index + 1}`,
+    schedule: {
+      ...DEFAULT_SCHEDULE,
+      ...(bucket.schedule || {})
+    },
+    blockedApps: (bucket.blockedApps || []).map((entry) => ({
+      name: entry.name || "",
+      path: entry.path || ""
+    }))
+  }));
+}
+
+function getBucket(index) {
+  return state.buckets[index] || null;
+}
+
+function markEditing() {
+  if (state.unlocked) {
+    state.isEditing = true;
+  }
+}
+
 function renderActivityLog() {
   const entries = state.runtimeState?.lastBlocked || [];
   const lastRun = state.runtimeState?.lastEnforcedAt;
@@ -63,55 +106,105 @@ function renderActivityLog() {
   }
 
   activityLog.innerHTML = entries
-    .map(
-      (entry) => `
+    .map((entry) => {
+      const bucketLabel = Array.isArray(entry.bucketNames) && entry.bucketNames.length > 0
+        ? ` | Bucket${entry.bucketNames.length === 1 ? "" : "s"}: ${entry.bucketNames.join(", ")}`
+        : "";
+
+      return `
         <div class="log-item">
           <div>
             <strong>${escapeHtml(entry.name)}</strong>
-            <span>${escapeHtml(entry.path || "Path unavailable")} | PID ${entry.pid}</span>
+            <span>${escapeHtml(entry.path || "Path unavailable")} | PID ${entry.pid}${escapeHtml(bucketLabel)}</span>
           </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderBucketApps(bucket, bucketIndex) {
+  if (bucket.blockedApps.length === 0) {
+    return `
+      <div class="app-item">
+        <div class="app-info">
+          <strong>No apps in this bucket yet</strong>
+          <span>Use "Add running apps" or "Browse for .exe files" to populate this bucket.</span>
+        </div>
+      </div>
+    `;
+  }
+
+  return bucket.blockedApps
+    .map(
+      (entry, appIndex) => `
+        <div class="app-item">
+          <div class="app-info">
+            <strong>${escapeHtml(entry.name)}</strong>
+            <span>${escapeHtml(entry.path || "Path unavailable. Blocking will match by process name.")}</span>
+          </div>
+          <button class="danger" type="button" data-action="remove-app" data-bucket-index="${bucketIndex}" data-app-index="${appIndex}">
+            Remove
+          </button>
         </div>
       `
     )
     .join("");
 }
 
-function renderApps() {
-  if (state.blockedApps.length === 0) {
-    appList.innerHTML = `
-      <div class="app-item">
-        <div class="app-info">
-          <strong>No apps selected yet</strong>
-          <span>Use "Add running apps" or "Browse for .exe files" to choose software that should be blocked.</span>
-        </div>
+function renderBuckets() {
+  if (state.buckets.length === 0) {
+    bucketList.innerHTML = `
+      <div class="bucket-empty">
+        <strong>No buckets yet</strong>
+        <span>Add a bucket to define a time range and the apps it should block.</span>
       </div>
     `;
     return;
   }
 
-  appList.innerHTML = state.blockedApps
+  bucketList.innerHTML = state.buckets
     .map(
-      (entry, index) => `
-        <div class="app-item">
-          <div class="app-info">
-            <strong>${escapeHtml(entry.name)}</strong>
-            <span>${escapeHtml(entry.path || "Path unavailable. Blocking will match by process name.")}</span>
+      (bucket, index) => `
+        <section class="bucket-card" data-bucket-index="${index}">
+          <div class="bucket-card-head">
+            <div class="bucket-title-block">
+              <p class="eyebrow">Bucket ${index + 1}</p>
+              <label class="bucket-name-field">
+                <span>Bucket Name</span>
+                <input type="text" value="${escapeHtml(bucket.name)}" data-field="name" placeholder="School, Work, Gaming, etc." />
+              </label>
+            </div>
+            <button class="danger" type="button" data-action="remove-bucket">Remove bucket</button>
           </div>
-          <button class="danger remove-app-button" data-index="${index}">Remove</button>
-        </div>
+
+          <div class="grid bucket-grid">
+            <label>
+              <span>Start Time</span>
+              <input type="time" value="${escapeHtml(bucket.schedule.start)}" data-field="start" />
+            </label>
+            <label>
+              <span>End Time</span>
+              <input type="time" value="${escapeHtml(bucket.schedule.end)}" data-field="end" />
+            </label>
+          </div>
+
+          <p class="hint bucket-hint">
+            Overnight windows are supported. Example: 22:00 to 06:00 blocks this bucket all night.
+          </p>
+
+          <div class="button-group bucket-actions">
+            <button class="secondary" type="button" data-action="add-running-apps">Add running apps</button>
+            <button class="secondary" type="button" data-action="browse-apps">Browse for .exe files</button>
+          </div>
+
+          <div class="app-list">
+            ${renderBucketApps(bucket, index)}
+          </div>
+        </section>
       `
     )
     .join("");
-
-  document.querySelectorAll(".remove-app-button").forEach((button) => {
-    button.addEventListener("click", () => {
-      const index = Number(button.dataset.index);
-      state.blockedApps.splice(index, 1);
-      state.isEditing = true;
-      renderApps();
-      renderStatus();
-    });
-  });
 }
 
 function renderStatus() {
@@ -126,26 +219,21 @@ function renderStatus() {
 
   if (!config.hasPin) {
     liveStatus.textContent = "Setup required";
-    statusDetail.textContent = "Create the admin PIN to turn on blocking.";
+    statusDetail.textContent = "Create the admin PIN to turn on bucket-based blocking.";
     return;
   }
 
-  if (!config.armed) {
-    liveStatus.textContent = "Paused";
-    statusDetail.textContent = "Blocking is disarmed until you arm it again with the admin PIN.";
-    return;
-  }
-
-  if (runtimeState?.withinWindow) {
+  const activeBuckets = runtimeState?.activeBuckets || [];
+  if (activeBuckets.length > 0) {
+    const activeNames = activeBuckets.map((bucket) => bucket.name).join(", ");
+    const watchedCount = activeBuckets.reduce((total, bucket) => total + bucket.blockedAppCount, 0);
     liveStatus.textContent = "Blocking now";
-    statusDetail.textContent = state.blockedApps.length === 0
-      ? "The daily window is active, but no blocked apps are selected yet."
-      : `Watching ${state.blockedApps.length} selected app${state.blockedApps.length === 1 ? "" : "s"} during the active daily window.`;
+    statusDetail.textContent = `Active bucket${activeBuckets.length === 1 ? "" : "s"}: ${activeNames}. Watching ${watchedCount} app${watchedCount === 1 ? "" : "s"}.`;
     return;
   }
 
   liveStatus.textContent = "Waiting";
-  statusDetail.textContent = `Outside the blocking window. Last enforcement: ${formatTimestamp(runtimeState?.lastEnforcedAt)}`;
+  statusDetail.textContent = `Outside all blocking windows. Last enforcement: ${formatTimestamp(runtimeState?.lastEnforcedAt)}`;
 }
 
 function renderViewMode() {
@@ -156,44 +244,64 @@ function renderViewMode() {
   dashboardView.classList.toggle("hidden", !hasPin || !state.unlocked);
 }
 
-function syncFormFields() {
-  if (!state.config) {
+function addAppsToBucket(bucketIndex, appEntries) {
+  const bucket = getBucket(bucketIndex);
+  if (!bucket) {
     return;
   }
 
-  document.getElementById("startTime").value = state.config.schedule.start;
-  document.getElementById("endTime").value = state.config.schedule.end;
-  document.getElementById("armedToggle").checked = state.config.armed;
-  document.getElementById("startupToggle").checked = state.config.startupEnabled;
-}
-
-function markEditing() {
-  if (state.unlocked) {
-    state.isEditing = true;
-  }
-}
-
-function addAppsToSelection(appEntries) {
   for (const appEntry of appEntries) {
     if (!appEntry) {
       continue;
     }
 
-    const duplicate = state.blockedApps.some((entry) => {
+    const duplicate = bucket.blockedApps.some((entry) => {
       return (
-        entry.name.toLowerCase() === appEntry.name.toLowerCase() &&
-        entry.path.toLowerCase() === appEntry.path.toLowerCase()
+        entry.name.toLowerCase() === String(appEntry.name || "").toLowerCase() &&
+        entry.path.toLowerCase() === String(appEntry.path || "").toLowerCase()
       );
     });
 
     if (!duplicate) {
-      state.blockedApps.push(appEntry);
+      bucket.blockedApps.push({
+        name: appEntry.name || "",
+        path: appEntry.path || ""
+      });
     }
   }
 
-  state.isEditing = true;
-  renderApps();
-  renderStatus();
+  markEditing();
+  renderBuckets();
+}
+
+function removeAppFromBucket(bucketIndex, appIndex) {
+  const bucket = getBucket(bucketIndex);
+  if (!bucket) {
+    return;
+  }
+
+  bucket.blockedApps.splice(appIndex, 1);
+  markEditing();
+  renderBuckets();
+}
+
+function removeBucket(bucketIndex) {
+  state.buckets.splice(bucketIndex, 1);
+  markEditing();
+  renderBuckets();
+}
+
+async function openRunningAppsPicker(bucketIndex) {
+  state.appPickerBucketIndex = bucketIndex;
+  setMessage(runningAppsMessage, "");
+  state.runningApps = await window.softwareBlocker.listRunningApps();
+  renderRunningAppsList();
+  runningAppsDialog.showModal();
+}
+
+async function addBrowsedApps(bucketIndex) {
+  const pickedApps = await window.softwareBlocker.pickApps();
+  addAppsToBucket(bucketIndex, pickedApps);
 }
 
 function renderRunningAppsList() {
@@ -224,31 +332,17 @@ function renderRunningAppsList() {
     .join("");
 }
 
-async function loadRunningApps() {
-  state.runningApps = await window.softwareBlocker.listRunningApps();
-  renderRunningAppsList();
-}
-
 async function refreshState() {
   const data = await window.softwareBlocker.getState();
   state.config = data.config;
   state.runtimeState = data.runtimeState;
 
   if (!state.isEditing) {
-    state.blockedApps = [...data.config.blockedApps];
-  } else if (state.blockedApps.length === 0 && data.config.blockedApps.length > 0) {
-    state.blockedApps = [...data.config.blockedApps];
-    state.isEditing = false;
+    state.buckets = cloneBuckets(data.config.buckets);
   }
 
   renderViewMode();
-
-  if (!state.formHydrated || !state.isEditing) {
-    syncFormFields();
-    state.formHydrated = true;
-  }
-
-  renderApps();
+  renderBuckets();
   renderStatus();
   renderActivityLog();
 }
@@ -264,10 +358,8 @@ document.getElementById("createPinButton").addEventListener("click", async () =>
   }
 
   state.unlocked = true;
-  state.blockedApps = [];
   state.isEditing = false;
-  state.formHydrated = false;
-  setMessage(setupMessage, "PIN created. Set your schedule and save whenever you're ready.");
+  setMessage(setupMessage, "PIN created. Build one or more buckets, then save.");
   await refreshState();
 });
 
@@ -281,27 +373,79 @@ document.getElementById("unlockButton").addEventListener("click", async () => {
   }
 
   state.unlocked = true;
-  state.blockedApps = [...state.config.blockedApps];
+  state.buckets = cloneBuckets(state.config?.buckets || []);
   state.isEditing = false;
-  state.formHydrated = false;
   document.getElementById("actionPin").value = pin;
   setMessage(unlockMessage, "");
   await refreshState();
 });
 
-document.getElementById("addAppsButton").addEventListener("click", async () => {
-  const pickedApps = await window.softwareBlocker.pickApps();
-  addAppsToSelection(pickedApps);
+document.getElementById("addBucketButton").addEventListener("click", () => {
+  state.buckets.push(createEmptyBucket());
+  markEditing();
+  renderBuckets();
 });
 
-document.getElementById("addRunningAppsButton").addEventListener("click", async () => {
-  setMessage(runningAppsMessage, "");
-  await loadRunningApps();
-  runningAppsDialog.showModal();
+bucketList.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) {
+    return;
+  }
+
+  const bucketIndex = Number(button.dataset.bucketIndex ?? button.closest("[data-bucket-index]")?.dataset.bucketIndex);
+  const action = button.dataset.action;
+
+  if (action === "remove-bucket") {
+    removeBucket(bucketIndex);
+    return;
+  }
+
+  if (action === "remove-app") {
+    removeAppFromBucket(bucketIndex, Number(button.dataset.appIndex));
+    return;
+  }
+
+  if (action === "add-running-apps") {
+    await openRunningAppsPicker(bucketIndex);
+    return;
+  }
+
+  if (action === "browse-apps") {
+    await addBrowsedApps(bucketIndex);
+  }
+});
+
+bucketList.addEventListener("input", (event) => {
+  const input = event.target.closest("input[data-field]");
+  if (!input) {
+    return;
+  }
+
+  const bucketIndex = Number(input.closest("[data-bucket-index]")?.dataset.bucketIndex);
+  const bucket = getBucket(bucketIndex);
+  if (!bucket) {
+    return;
+  }
+
+  const field = input.dataset.field;
+  if (field === "name") {
+    bucket.name = input.value;
+  }
+
+  if (field === "start") {
+    bucket.schedule.start = input.value;
+  }
+
+  if (field === "end") {
+    bucket.schedule.end = input.value;
+  }
+
+  markEditing();
 });
 
 document.getElementById("refreshRunningAppsButton").addEventListener("click", async () => {
-  await loadRunningApps();
+  state.runningApps = await window.softwareBlocker.listRunningApps();
+  renderRunningAppsList();
 });
 
 document.getElementById("confirmRunningAppsButton").addEventListener("click", () => {
@@ -314,22 +458,15 @@ document.getElementById("confirmRunningAppsButton").addEventListener("click", ()
     return;
   }
 
-  addAppsToSelection(selectedApps);
+  addAppsToBucket(state.appPickerBucketIndex, selectedApps);
   runningAppsDialog.close();
 });
 
 document.getElementById("saveButton").addEventListener("click", async () => {
   const pin = document.getElementById("actionPin").value;
-  const schedule = {
-    start: document.getElementById("startTime").value,
-    end: document.getElementById("endTime").value
-  };
   const payload = {
     pin,
-    schedule,
-    blockedApps: state.blockedApps,
-    armed: document.getElementById("armedToggle").checked,
-    startupEnabled: document.getElementById("startupToggle").checked
+    buckets: cloneBuckets(state.buckets)
   };
 
   const result = await window.softwareBlocker.saveSettings(payload);
@@ -338,13 +475,12 @@ document.getElementById("saveButton").addEventListener("click", async () => {
     return;
   }
 
-  setMessage(dashboardMessage, "Settings saved.");
+  setMessage(dashboardMessage, "Buckets saved.");
   state.config = {
     ...state.config,
-    ...payload
+    buckets: cloneBuckets(state.buckets)
   };
   state.isEditing = false;
-  state.formHydrated = false;
   await refreshState();
 });
 
@@ -377,23 +513,11 @@ document.getElementById("confirmPinChangeButton").addEventListener("click", asyn
   pinDialog.close();
 });
 
-document.getElementById("quitButton").addEventListener("click", async () => {
-  const pin = document.getElementById("actionPin").value;
-  const result = await window.softwareBlocker.requestQuit({ pin });
-
-  if (!result.ok) {
-    setMessage(dashboardMessage, result.error, true);
-  }
-});
+document.getElementById("actionPin").addEventListener("input", markEditing);
+document.getElementById("actionPin").addEventListener("change", markEditing);
 
 window.softwareBlocker.onStateUpdated(() => {
   refreshState();
-});
-
-["startTime", "endTime", "armedToggle", "startupToggle", "actionPin"].forEach((id) => {
-  const element = document.getElementById(id);
-  element.addEventListener("input", markEditing);
-  element.addEventListener("change", markEditing);
 });
 
 setInterval(refreshState, 5000);

@@ -193,21 +193,28 @@ label span {
 }
 
 .app-list,
-.activity-log {
+.activity-log,
+.bucket-list {
   display: grid;
   gap: 0.8rem;
 }
 
 .app-item,
-.log-item {
+.log-item,
+.bucket-card,
+.bucket-empty {
   display: flex;
-  justify-content: space-between;
   gap: 1rem;
-  align-items: center;
   padding: 1rem;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.7);
   border: 1px solid rgba(18, 53, 36, 0.08);
+}
+
+.app-item,
+.log-item {
+  justify-content: space-between;
+  align-items: center;
 }
 
 .app-info strong,
@@ -299,13 +306,56 @@ label span {
   word-break: break-all;
 }
 
+.bucket-card,
+.bucket-empty {
+  display: grid;
+}
+
+.bucket-card {
+  padding: 1.1rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(246, 241, 230, 0.88));
+}
+
+.bucket-card-head {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.bucket-title-block {
+  flex: 1;
+}
+
+.bucket-name-field span {
+  margin-top: 0.35rem;
+}
+
+.bucket-grid {
+  margin-top: 0.4rem;
+}
+
+.bucket-hint {
+  margin: 0;
+}
+
+.bucket-actions {
+  margin-top: 0.1rem;
+}
+
+.bucket-empty strong {
+  display: block;
+}
+
 @media (max-width: 780px) {
   .hero,
   .grid {
     grid-template-columns: 1fr;
   }
 
-  .panel-head {
+  .panel-head,
+  .bucket-card-head {
     align-items: flex-start;
     flex-direction: column;
   }

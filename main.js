@@ -6,16 +6,9 @@ const crypto = require("crypto");
 const { execFile } = require("child_process");
 
 const APP_TITLE = "Software Blocker";
-const DEFAULT_CONFIG = {
-  schedule: {
-    start: "09:00",
-    end: "17:00"
-  },
-  blockedApps: [],
-  armed: true,
-  startupEnabled: true,
-  pinSalt: "",
-  pinHash: ""
+const DEFAULT_SCHEDULE = {
+  start: "09:00",
+  end: "17:00"
 };
 
 let mainWindow = null;
@@ -25,6 +18,7 @@ let isQuitting = false;
 let config = null;
 let runtimeState = {
   withinWindow: false,
+  activeBuckets: [],
   lastEnforcedAt: null,
   lastBlocked: [],
   lastError: null
@@ -45,6 +39,87 @@ app.on("second-instance", () => {
   }
 });
 
+function createBucketId() {
+  return crypto.randomUUID();
+}
+
+function normalizeAppEntry(filePath) {
+  return {
+    path: filePath,
+    name: path.basename(filePath)
+  };
+}
+
+function normalizeRunningAppEntry(processInfo) {
+  return {
+    path: processInfo.ExecutablePath || "",
+    name: processInfo.Name || "Unknown.exe"
+  };
+}
+
+function normalizeBlockedAppEntry(entry) {
+  if (!entry) {
+    return null;
+  }
+
+  const entryPath = String(entry.path || "").trim();
+  const entryName = String(entry.name || (entryPath ? path.basename(entryPath) : "")).trim();
+
+  if (!entryName) {
+    return null;
+  }
+
+  return {
+    path: entryPath,
+    name: entryName
+  };
+}
+
+function dedupeBlockedApps(appEntries) {
+  const seen = new Set();
+  const normalizedEntries = [];
+
+  for (const appEntry of appEntries || []) {
+    const normalized = normalizeBlockedAppEntry(appEntry);
+    if (!normalized) {
+      continue;
+    }
+
+    const key = `${normalized.name.toLowerCase()}|${normalized.path.toLowerCase()}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    normalizedEntries.push(normalized);
+  }
+
+  return normalizedEntries;
+}
+
+function createDefaultBucket(index = 0, overrides = {}) {
+  const fallbackName = `Bucket ${index + 1}`;
+
+  return {
+    id: String(overrides.id || createBucketId()),
+    name: String(overrides.name || "").trim() || fallbackName,
+    schedule: {
+      ...DEFAULT_SCHEDULE,
+      ...(overrides.schedule || {})
+    },
+    blockedApps: dedupeBlockedApps(overrides.blockedApps)
+  };
+}
+
+function createDefaultConfig() {
+  return {
+    buckets: [createDefaultBucket(0)],
+    startupEnabled: true,
+    pinSalt: "",
+    pinHash: ""
+  };
+}
+
 function getConfigPath() {
   return path.join(app.getPath("userData"), "config.json");
 }
@@ -57,22 +132,43 @@ function ensureConfig() {
   }
 
   if (!fs.existsSync(configPath)) {
-    fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2), "utf8");
+    fs.writeFileSync(configPath, JSON.stringify(createDefaultConfig(), null, 2), "utf8");
   }
+}
+
+function normalizeBucketsFromParsedConfig(parsed) {
+  if (Array.isArray(parsed.buckets) && parsed.buckets.length > 0) {
+    return parsed.buckets.map((bucket, index) => createDefaultBucket(index, bucket));
+  }
+
+  const hasLegacyShape =
+    parsed.schedule ||
+    (Array.isArray(parsed.blockedApps) && parsed.blockedApps.length > 0);
+
+  if (hasLegacyShape) {
+    return [
+      createDefaultBucket(0, {
+        id: "legacy-default",
+        name: "Main bucket",
+        schedule: parsed.schedule,
+        blockedApps: parsed.blockedApps
+      })
+    ];
+  }
+
+  return createDefaultConfig().buckets;
 }
 
 function loadConfig() {
   ensureConfig();
   const raw = fs.readFileSync(getConfigPath(), "utf8");
   const parsed = JSON.parse(raw);
+
   return {
-    ...DEFAULT_CONFIG,
-    ...parsed,
-    schedule: {
-      ...DEFAULT_CONFIG.schedule,
-      ...(parsed.schedule || {})
-    },
-    blockedApps: Array.isArray(parsed.blockedApps) ? parsed.blockedApps : []
+    buckets: normalizeBucketsFromParsedConfig(parsed),
+    pinSalt: String(parsed.pinSalt || ""),
+    pinHash: String(parsed.pinHash || ""),
+    startupEnabled: true
   };
 }
 
@@ -84,10 +180,8 @@ function saveConfig(nextConfig) {
 function sanitizeConfigForRenderer() {
   return {
     hasPin: Boolean(config.pinHash && config.pinSalt),
-    schedule: config.schedule,
-    blockedApps: config.blockedApps,
-    armed: config.armed,
-    startupEnabled: config.startupEnabled
+    buckets: config.buckets,
+    startupEnabled: true
   };
 }
 
@@ -109,20 +203,6 @@ function verifyPin(pin) {
   }
 
   return hashPin(pin, config.pinSalt) === config.pinHash;
-}
-
-function normalizeAppEntry(filePath) {
-  return {
-    path: filePath,
-    name: path.basename(filePath)
-  };
-}
-
-function normalizeRunningAppEntry(processInfo) {
-  return {
-    path: processInfo.ExecutablePath || "",
-    name: processInfo.Name || "Unknown.exe"
-  };
 }
 
 function minutesFromTimeString(value) {
@@ -150,6 +230,10 @@ function isWithinWindow(schedule, now = new Date()) {
   return currentMinutes >= startMinutes || currentMinutes < endMinutes;
 }
 
+function getActiveBuckets(now = new Date()) {
+  return config.buckets.filter((bucket) => isWithinWindow(bucket.schedule, now));
+}
+
 function createTrayIcon() {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
@@ -166,15 +250,17 @@ function updateTrayTooltip() {
     return;
   }
 
-  const activeLabel = config.armed ? "Armed" : "Paused";
-  const windowLabel = runtimeState.withinWindow ? "blocking window active" : "outside blocking window";
-  tray.setToolTip(`${APP_TITLE} - ${activeLabel}, ${windowLabel}`);
+  const bucketCount = runtimeState.activeBuckets.length;
+  const windowLabel = bucketCount > 0
+    ? `${bucketCount} blocking bucket${bucketCount === 1 ? "" : "s"} active`
+    : "outside blocking windows";
+  tray.setToolTip(`${APP_TITLE} - ${windowLabel}`);
 }
 
 function syncStartupRegistration() {
   const args = app.isPackaged ? ["--hidden"] : [app.getAppPath(), "--hidden"];
   app.setLoginItemSettings({
-    openAtLogin: Boolean(config.startupEnabled),
+    openAtLogin: true,
     openAsHidden: true,
     path: process.execPath,
     args
@@ -192,10 +278,10 @@ function showWindow() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 880,
-    height: 720,
-    minWidth: 760,
-    minHeight: 620,
+    width: 1040,
+    height: 780,
+    minWidth: 820,
+    minHeight: 680,
     show: !process.argv.includes("--hidden"),
     title: APP_TITLE,
     autoHideMenuBar: true,
@@ -290,51 +376,98 @@ async function killProcess(pid) {
   });
 }
 
-function shouldBlockProcess(processInfo, blockedSetByPath, blockedSetByName) {
+function collectBlockingRulesFromBuckets(activeBuckets) {
+  const blockedPaths = new Map();
+  const blockedNames = new Map();
+
+  for (const bucket of activeBuckets) {
+    for (const appEntry of bucket.blockedApps) {
+      const entryPath = appEntry.path.toLowerCase();
+      const entryName = appEntry.name.toLowerCase();
+
+      if (entryPath) {
+        const pathBuckets = blockedPaths.get(entryPath) || new Set();
+        pathBuckets.add(bucket.name);
+        blockedPaths.set(entryPath, pathBuckets);
+      }
+
+      if (entryName) {
+        const nameBuckets = blockedNames.get(entryName) || new Set();
+        nameBuckets.add(bucket.name);
+        blockedNames.set(entryName, nameBuckets);
+      }
+    }
+  }
+
+  return { blockedPaths, blockedNames };
+}
+
+function getMatchingBucketNames(processInfo, blockedPaths, blockedNames) {
   const executablePath = (processInfo.ExecutablePath || "").toLowerCase();
   const name = (processInfo.Name || "").toLowerCase();
   const currentExecutable = process.execPath.toLowerCase();
 
   if (Number(processInfo.ProcessId) === process.pid) {
-    return false;
+    return [];
   }
 
   if (executablePath && executablePath === currentExecutable) {
-    return false;
+    return [];
   }
 
-  if (executablePath && blockedSetByPath.has(executablePath)) {
-    return true;
+  const matches = new Set();
+
+  if (executablePath && blockedPaths.has(executablePath)) {
+    for (const bucketName of blockedPaths.get(executablePath)) {
+      matches.add(bucketName);
+    }
   }
 
-  return blockedSetByName.has(name);
+  if (blockedNames.has(name)) {
+    for (const bucketName of blockedNames.get(name)) {
+      matches.add(bucketName);
+    }
+  }
+
+  return [...matches];
 }
 
 async function enforceBlockingIfNeeded() {
-  runtimeState.withinWindow = Boolean(config.armed) && isWithinWindow(config.schedule);
+  const activeBuckets = getActiveBuckets();
+  runtimeState.activeBuckets = activeBuckets.map((bucket) => ({
+    id: bucket.id,
+    name: bucket.name,
+    schedule: bucket.schedule,
+    blockedAppCount: bucket.blockedApps.length
+  }));
+  runtimeState.withinWindow = activeBuckets.length > 0;
   updateTrayTooltip();
 
-  if (!config.armed || !runtimeState.withinWindow || config.blockedApps.length === 0) {
+  if (activeBuckets.length === 0) {
     return;
   }
 
-  const blockedSetByPath = new Set(config.blockedApps.map((entry) => entry.path.toLowerCase()));
-  const blockedSetByName = new Set(config.blockedApps.map((entry) => entry.name.toLowerCase()));
+  const { blockedPaths, blockedNames } = collectBlockingRulesFromBuckets(activeBuckets);
+  if (blockedPaths.size === 0 && blockedNames.size === 0) {
+    return;
+  }
 
   const processes = await listRunningProcesses();
-  const matches = processes.filter((processInfo) =>
-    shouldBlockProcess(processInfo, blockedSetByPath, blockedSetByName)
-  );
-
   const blockedNow = [];
 
-  for (const processInfo of matches) {
+  for (const processInfo of processes) {
+    const matchingBucketNames = getMatchingBucketNames(processInfo, blockedPaths, blockedNames);
+    if (matchingBucketNames.length === 0) {
+      continue;
+    }
+
     try {
       await killProcess(processInfo.ProcessId);
       blockedNow.push({
         pid: processInfo.ProcessId,
         name: processInfo.Name,
-        path: processInfo.ExecutablePath || ""
+        path: processInfo.ExecutablePath || "",
+        bucketNames: matchingBucketNames
       });
     } catch (error) {
       runtimeState.lastError = error.message;
@@ -380,14 +513,24 @@ function startBlockingLoop() {
 
 function validateConfigPayload(payload) {
   const errors = [];
-  const { schedule } = payload;
 
-  if (!schedule?.start || !schedule?.end) {
-    errors.push("Start and end time are required.");
+  if (!Array.isArray(payload.buckets) || payload.buckets.length === 0) {
+    errors.push("Add at least one blocking bucket.");
+    return errors;
   }
 
-  if (schedule?.start === schedule?.end) {
-    errors.push("Start and end time cannot be the same.");
+  for (const bucket of payload.buckets) {
+    if (!bucket.schedule?.start || !bucket.schedule?.end) {
+      errors.push(`"${bucket.name}" needs both a start and end time.`);
+    }
+
+    if (bucket.schedule?.start === bucket.schedule?.end) {
+      errors.push(`"${bucket.name}" cannot use the same start and end time.`);
+    }
+
+    if (!Array.isArray(bucket.blockedApps) || bucket.blockedApps.length === 0) {
+      errors.push(`"${bucket.name}" needs at least one app to block.`);
+    }
   }
 
   return errors;
@@ -498,10 +641,8 @@ ipcMain.handle("save-settings", async (_event, payload) => {
 
   const nextConfig = {
     ...config,
-    schedule: payload.schedule,
-    blockedApps: payload.blockedApps,
-    startupEnabled: Boolean(payload.startupEnabled),
-    armed: Boolean(payload.armed)
+    buckets: (payload.buckets || []).map((bucket, index) => createDefaultBucket(index, bucket)),
+    startupEnabled: true
   };
 
   const errors = validateConfigPayload(nextConfig);
@@ -538,17 +679,6 @@ ipcMain.handle("change-pin", async (_event, payload) => {
     ...createPinRecord(nextPin)
   });
 
-  return { ok: true };
-});
-
-ipcMain.handle("request-quit", async (_event, payload) => {
-  const pin = String(payload?.pin || "");
-  if (!verifyPin(pin)) {
-    return { ok: false, error: "Incorrect PIN." };
-  }
-
-  isQuitting = true;
-  app.quit();
   return { ok: true };
 });
 
