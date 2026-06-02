@@ -342,7 +342,9 @@ async function refreshState() {
   }
 
   renderViewMode();
-  renderBuckets();
+  if (!state.isEditing) {
+    renderBuckets();
+  }
   renderStatus();
   renderActivityLog();
 }
