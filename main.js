@@ -10,6 +10,8 @@ const DEFAULT_SCHEDULE = {
   start: "09:00",
   end: "17:00"
 };
+const DEFAULT_DAYS = [0, 1, 2, 3, 4, 5, 6];
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 let mainWindow = null;
 let tray = null;
@@ -99,6 +101,9 @@ function dedupeBlockedApps(appEntries) {
 
 function createDefaultBucket(index = 0, overrides = {}) {
   const fallbackName = `Bucket ${index + 1}`;
+  const days = Array.isArray(overrides.days) && overrides.days.length > 0
+    ? [...new Set(overrides.days.map((day) => Number(day)).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
+    : [...DEFAULT_DAYS];
 
   return {
     id: String(overrides.id || createBucketId()),
@@ -107,6 +112,7 @@ function createDefaultBucket(index = 0, overrides = {}) {
       ...DEFAULT_SCHEDULE,
       ...(overrides.schedule || {})
     },
+    days,
     blockedApps: dedupeBlockedApps(overrides.blockedApps)
   };
 }
@@ -230,8 +236,40 @@ function isWithinWindow(schedule, now = new Date()) {
   return currentMinutes >= startMinutes || currentMinutes < endMinutes;
 }
 
+function getPreviousDayIndex(dayIndex) {
+  return (dayIndex + 6) % 7;
+}
+
 function getActiveBuckets(now = new Date()) {
-  return config.buckets.filter((bucket) => isWithinWindow(bucket.schedule, now));
+  const currentDay = now.getDay();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  return config.buckets.filter((bucket) => {
+    if (!Array.isArray(bucket.days) || bucket.days.length === 0) {
+      return false;
+    }
+
+    const startMinutes = minutesFromTimeString(bucket.schedule.start);
+    const endMinutes = minutesFromTimeString(bucket.schedule.end);
+
+    if (startMinutes === endMinutes) {
+      return false;
+    }
+
+    if (startMinutes < endMinutes) {
+      return bucket.days.includes(currentDay) && currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    }
+
+    if (currentMinutes >= startMinutes) {
+      return bucket.days.includes(currentDay);
+    }
+
+    if (currentMinutes < endMinutes) {
+      return bucket.days.includes(getPreviousDayIndex(currentDay));
+    }
+
+    return false;
+  });
 }
 
 function createTrayIcon() {
@@ -526,6 +564,10 @@ function validateConfigPayload(payload) {
 
     if (bucket.schedule?.start === bucket.schedule?.end) {
       errors.push(`"${bucket.name}" cannot use the same start and end time.`);
+    }
+
+    if (!Array.isArray(bucket.days) || bucket.days.length === 0) {
+      errors.push(`"${bucket.name}" needs at least one active day.`);
     }
 
     if (!Array.isArray(bucket.blockedApps) || bucket.blockedApps.length === 0) {

@@ -344,6 +344,64 @@ label span {
   margin-top: 0.1rem;
 }
 
+.bucket-days {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.9rem;
+}
+
+.bucket-days-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.day-picker {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.day-chip {
+  position: relative;
+  display: grid;
+}
+
+.day-chip input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.day-chip span {
+  display: grid;
+  place-items: center;
+  min-height: 2.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(18, 53, 36, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.day-chip input:checked + span {
+  background: var(--accent);
+  color: #f8f5ec;
+  border-color: var(--accent);
+}
+
+.day-chip input:focus-visible + span {
+  outline: 2px solid rgba(18, 53, 36, 0.35);
+  outline-offset: 2px;
+}
+
+.day-chip:hover span {
+  transform: translateY(-1px);
+}
+
 .bucket-empty strong {
   display: block;
 }
@@ -358,5 +416,15 @@ label span {
   .bucket-card-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .day-picker {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .day-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -12,6 +12,15 @@ const DEFAULT_SCHEDULE = {
   start: "09:00",
   end: "17:00"
 };
+const DAY_OPTIONS = [
+  { value: 0, label: "Sun" },
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" }
+];
 
 const setupView = document.getElementById("setupView");
 const unlockView = document.getElementById("unlockView");
@@ -60,6 +69,7 @@ function createEmptyBucket(index = state.buckets.length) {
     id: createBucketId(),
     name: `Bucket ${index + 1}`,
     schedule: { ...DEFAULT_SCHEDULE },
+    days: DAY_OPTIONS.map((day) => day.value),
     blockedApps: []
   };
 }
@@ -72,6 +82,9 @@ function cloneBuckets(buckets) {
       ...DEFAULT_SCHEDULE,
       ...(bucket.schedule || {})
     },
+    days: Array.isArray(bucket.days) && bucket.days.length > 0
+      ? [...new Set(bucket.days.map((day) => Number(day)).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
+      : DAY_OPTIONS.map((day) => day.value),
     blockedApps: (bucket.blockedApps || []).map((entry) => ({
       name: entry.name || "",
       path: entry.path || ""
@@ -152,6 +165,25 @@ function renderBucketApps(bucket, bucketIndex) {
     .join("");
 }
 
+function renderBucketDays(bucket, bucketIndex) {
+  const selectedDays = new Set((bucket.days || []).map((day) => Number(day)));
+
+  return `
+    <div class="day-picker" role="group" aria-label="Active days for ${escapeHtml(bucket.name || `Bucket ${bucketIndex + 1}`)}">
+      ${DAY_OPTIONS.map((day) => `
+        <label class="day-chip">
+          <input
+            type="checkbox"
+            data-day="${day.value}"
+            ${selectedDays.has(day.value) ? "checked" : ""}
+          />
+          <span>${day.label}</span>
+        </label>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderBuckets() {
   if (state.buckets.length === 0) {
     bucketList.innerHTML = `
@@ -189,8 +221,13 @@ function renderBuckets() {
             </label>
           </div>
 
+          <div class="bucket-days">
+            <span class="bucket-days-label">Active Days</span>
+            ${renderBucketDays(bucket, index)}
+          </div>
+
           <p class="hint bucket-hint">
-            Overnight windows are supported. Example: 22:00 to 06:00 blocks this bucket all night.
+            Overnight windows are supported. Example: 22:00 to 06:00 blocks this bucket all night on the selected days.
           </p>
 
           <div class="button-group bucket-actions">
@@ -442,6 +479,31 @@ bucketList.addEventListener("input", (event) => {
     bucket.schedule.end = input.value;
   }
 
+  markEditing();
+});
+
+bucketList.addEventListener("change", (event) => {
+  const checkbox = event.target.closest("input[data-day]");
+  if (!checkbox) {
+    return;
+  }
+
+  const bucketIndex = Number(checkbox.closest("[data-bucket-index]")?.dataset.bucketIndex);
+  const bucket = getBucket(bucketIndex);
+  if (!bucket) {
+    return;
+  }
+
+  const day = Number(checkbox.dataset.day);
+  const nextDays = new Set((bucket.days || []).map((value) => Number(value)));
+
+  if (checkbox.checked) {
+    nextDays.add(day);
+  } else {
+    nextDays.delete(day);
+  }
+
+  bucket.days = [...nextDays].sort((left, right) => left - right);
   markEditing();
 });
 
